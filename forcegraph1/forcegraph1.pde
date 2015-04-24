@@ -5,19 +5,113 @@ int [][] graph;
 HashMap<Integer, PVector> posDict;
 int i=0;
 boolean animate = false;
+float stop_threshold = 0.005;
+boolean belowStopThreshold = false;
 
 void setup(){
   
  size(640, 360);
  background(255);
- frameRate(200);
+ frameRate(400);
  stroke(0); 
  noLoop();
  int listEdges [][] = {{0,1},{0,2},{1,2},{2,3},{3,4},{3,5},{2,5},{2,6},{6,7},{7,8},{5,7}};
- graph = getHardCodedGraph(9,listEdges);
+ //graph = getHardCodedGraph(9,listEdges);
  //graph = getCloud(10);
-// graph = getPolygon(5);
+ graph = getPolygon(21); // polygons of size > 22 are not reaching equilibrium for some reason????
  posDict = randomPositions(graph.length);
+}
+
+boolean doSegIntersect(PVector uA, PVector uB, PVector vA, PVector vB){
+  // credit http://processingjs.org/learning/custom/intersect/
+
+  float x1, y1, x2, y2, x3, y3, x4, y4; 
+  x1 = uA.x;
+  y1 = uA.y; 
+  x2 = uB.x; 
+  y2 = uB.y; 
+  x3 = vA.x;
+  y3 = vA.y; 
+  x4 = vB.x; 
+  y4 = vB.y;
+  
+  float a1, a2, b1, b2, c1, c2;
+  float r1, r2 , r3, r4;
+  float denom, offset, num;
+
+  // Compute a1, b1, c1, where line joining points 1 and 2
+  // is "a1 x + b1 y + c1 = 0".
+  a1 = y2 - y1;
+  b1 = x1 - x2;
+  c1 = (x2 * y1) - (x1 * y2);
+
+  // Compute r3 and r4.
+  r3 = ((a1 * x3) + (b1 * y3) + c1);
+  r4 = ((a1 * x4) + (b1 * y4) + c1);
+
+  // Check signs of r3 and r4. If both point 3 and point 4 lie on
+  // same side of line 1, the line segments do not intersect.
+  if ((r3 != 0) && (r4 != 0) && same_sign(r3, r4)){
+    return false;
+  }
+
+  // Compute a2, b2, c2
+  a2 = y4 - y3;
+  b2 = x3 - x4;
+  c2 = (x4 * y3) - (x3 * y4);
+
+  // Compute r1 and r2
+  r1 = (a2 * x1) + (b2 * y1) + c2;
+  r2 = (a2 * x2) + (b2 * y2) + c2;
+
+  // Check signs of r1 and r2. If both point 1 and point 2 lie
+  // on same side of second line segment, the line segments do
+  // not intersect.
+  if ((r1 != 0) && (r2 != 0) && (same_sign(r1, r2))){
+    return false;
+  }
+  
+  return true;
+
+}
+
+boolean same_sign(float a, float b){
+  return (( a * b) >= 0);
+}
+
+
+int calculateNumCrossings(){
+  
+  int total = 0;
+  
+  ArrayList<ArrayList<PVector>> segments = new ArrayList<ArrayList<PVector>>();
+  
+  for (int i=0; i<graph.length; i++){
+    for (int j=i; j<graph[i].length; j++){
+      // starting at j=i since we only need to check the upper-triangular matrix
+      if (graph[i][j] == 1) { // if there is an edge between i and j
+        PVector vA = posDict.get(i);
+        PVector vB = posDict.get(j);
+        
+        // check to see if it intersects with any of the previous segments
+        for (ArrayList<PVector> line2 : segments) {
+          if (doSegIntersect(line2.get(0), line2.get(1), vA, vB)){
+            total += 1;
+          }
+        }
+        
+        // add it to the list to be checked against future segments
+        ArrayList<PVector> line = new ArrayList<PVector>();
+        line.add(vA);
+        line.add(vB);
+        
+        segments.add(line);
+      }
+    }
+  }
+  
+  return total;
+  
 }
 
 
@@ -27,8 +121,18 @@ void draw(){
    print("\n\n ITERATION "+i+"\n\n");
    i++;
    HashMap<Integer, PVector> dispF = calculateDisp(posDict, graph);
+   // will also set the variable belowStopThreshold to true if all the displacements are less
+   // than the constant stop_threshold
+   
    drawGraph(posDict,graph);
-   posDict = updatePos(posDict, dispF, n);
+   print("\n crossings: "+calculateNumCrossings());
+
+   if (belowStopThreshold){
+     noLoop();
+     print("\n crossings: "+calculateNumCrossings());
+   } else {
+     posDict = updatePos(posDict, dispF, n);
+   }
 }
 
 PVector clipVectorToScreen(PVector cur){
@@ -41,6 +145,7 @@ PVector clipVectorToScreen(PVector cur){
 
 HashMap<Integer,PVector> updatePos(HashMap<Integer, PVector> posDict, HashMap<Integer, PVector> dispF, int n){
   float delta= 0.1;
+  
   for (int i=0; i<n; i++){
     PVector cur= posDict.get(i);
     PVector disp= dispF.get(i);
@@ -59,6 +164,8 @@ HashMap<Integer,PVector> updatePos(HashMap<Integer, PVector> posDict, HashMap<In
 
 HashMap<Integer, PVector> calculateDisp(HashMap<Integer, PVector> posDict, int[][] graph){
   
+  belowStopThreshold = true;
+  
   HashMap<Integer, PVector> dispF= new HashMap<Integer, PVector>();
   for(int i=0; i<graph.length; i++){
     PVector cur= new PVector();
@@ -72,7 +179,13 @@ HashMap<Integer, PVector> calculateDisp(HashMap<Integer, PVector> posDict, int[]
         cur.add(sprF(posDict.get(i),posDict.get(j)));
       }
     }
+    
     dispF.put(i, cur);
+    print("\n"+cur.mag());
+    
+    if (cur.mag() > stop_threshold){
+      belowStopThreshold = false;
+    }
   }
   
 //  print("\nDISP-F\n");
@@ -100,6 +213,8 @@ PVector repF(PVector u, PVector v){
 }
 
 PVector repFquick(PVector u, PVector v){
+  // we're not using this
+  
   int l=20;
   PVector utoV = PVector.sub(v,u);
   float mag = utoV.mag();
@@ -137,7 +252,8 @@ void drawGraph(HashMap<Integer, PVector> posDict, int [] [] graph){
     point(posDict.get(i).x,posDict.get(i).y); // draw point for every vertex
     
     strokeWeight(1);
-    for (int j=0; j<graph[i].length; j++){
+    for (int j=i; j<graph[i].length; j++){
+      // starting at j=i since we only need to draw the upper triangular matrix
       if (graph[i][j] != graph[j][i]){
         throw new IllegalArgumentException("Invalid adjacency matrix: need graph(i,j)=graph(j,i)");
       }
